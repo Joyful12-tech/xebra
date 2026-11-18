@@ -8,6 +8,7 @@ import {
 } from "@xebra/sdk";
 import { stellarDestination } from "@xebra/sdk/core";
 import { describe, expect, it } from "vitest";
+import { OPEN_GUARD } from "./auth";
 import type { Deps } from "./deps";
 import { endpoints } from "./endpoints";
 import {
@@ -26,7 +27,7 @@ import { createService } from "./service";
 const BASE = "https://api.xebra.exchange/v1";
 
 function api(over: Partial<Deps> = {}) {
-  return endpoints(createService(deps({ build: buildDeps(), ...over })));
+  return endpoints(createService(deps({ build: buildDeps(), ...over })), OPEN_GUARD);
 }
 
 const get = (path: string) => new Request(`${BASE}${path}`);
@@ -126,6 +127,7 @@ describe("quoting Solana", () => {
           }),
         }),
       ),
+      OPEN_GUARD,
     );
     const res = await v1.quote(
       get(`/quote?from=stellar&to=solana&amount=10&recipient=${SOLANA_WALLET}`),
