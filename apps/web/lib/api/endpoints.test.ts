@@ -8,6 +8,14 @@ import {
 } from "@xebra/sdk";
 import { stellarDestination } from "@xebra/sdk/core";
 import { describe, expect, it } from "vitest";
+import {
+  DELETE as catchAllDelete,
+  GET as catchAllGet,
+  HEAD as catchAllHead,
+  PATCH as catchAllPatch,
+  POST as catchAllPost,
+  PUT as catchAllPut,
+} from "../../app/v1/[[...rest]]/route";
 import type { Deps } from "./deps";
 import { endpoints } from "./endpoints";
 import {
@@ -99,6 +107,27 @@ describe("answers that parse with their schemas", () => {
 
   it("GET /health", async () => {
     expect(await (await api().health(get("/health"))).json()).toMatchObject({ status: "ok" });
+  });
+});
+
+describe("paths the API does not have", () => {
+  it("answers every method with a not_found problem, not the site's 404 page", async () => {
+    for (const handler of [
+      catchAllGet,
+      catchAllHead,
+      catchAllPost,
+      catchAllPut,
+      catchAllPatch,
+      catchAllDelete,
+    ]) {
+      const res = await handler();
+      expect(res.status).toBe(404);
+      expect(await problemOf(res)).toMatchObject({
+        code: "not_found",
+        status: 404,
+        detail: "The API has no such endpoint. See https://docs.xebra.exchange/api.",
+      });
+    }
   });
 });
 
