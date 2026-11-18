@@ -14,6 +14,8 @@ export class ApiError extends Error {
     readonly code: ApiErrorCode,
     readonly detail: string,
     readonly extra: Record<string, unknown> = {},
+    /** Headers this answer must carry, such as `Retry-After` on a 429. */
+    readonly headers: Record<string, string> = {},
   ) {
     super(detail);
     this.name = "ApiError";

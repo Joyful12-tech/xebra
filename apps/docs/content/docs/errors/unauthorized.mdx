@@ -11,9 +11,15 @@ The API key sent in `Authorization: Bearer ...` was not accepted.
 
 ## What to do
 
-Check the key. Today the API needs no key at all, so you only see this if keys are switched on and yours is wrong or revoked.
+Check the key, and that it has not been revoked. Only requests that send an `Authorization` header
+are refused: a request with no key at all runs at the anonymous limit instead.
 
-<Callout>API keys are not issued yet. See the [changelog](/docs/changelog).</Callout>
+A revoked key stops working within a minute, so a `401` on a key that worked a moment ago can be
+revocation rather than a typo.
+
+<Callout title="Key formats">
+  A key is `xk_live_` followed by 32 letters and digits. See [API keys](/docs/guides/api-keys).
+</Callout>
 
 ## Example
 

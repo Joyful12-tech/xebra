@@ -16,6 +16,7 @@ import {
   POST as catchAllPost,
   PUT as catchAllPut,
 } from "../../app/v1/[[...rest]]/route";
+import { type Caller, createGate, memoryRateStore } from "./access";
 import type { Deps } from "./deps";
 import { endpoints } from "./endpoints";
 import {
@@ -27,14 +28,15 @@ import {
   cfg,
   deps,
   health,
+  openGate,
 } from "./fakes";
 import { preflight } from "./http";
 import { createService } from "./service";
 
 const BASE = "https://api.xebra.exchange/v1";
 
-function api(over: Partial<Deps> = {}) {
-  return endpoints(createService(deps({ build: buildDeps(), ...over })));
+function api(over: Partial<Deps> = {}, gate = openGate) {
+  return endpoints(createService(deps({ build: buildDeps(), ...over })), gate);
 }
 
 const get = (path: string) => new Request(`${BASE}${path}`);
@@ -155,6 +157,7 @@ describe("quoting Solana", () => {
           }),
         }),
       ),
+      openGate,
     );
     const res = await v1.quote(
       get(`/quote?from=stellar&to=solana&amount=10&recipient=${SOLANA_WALLET}`),

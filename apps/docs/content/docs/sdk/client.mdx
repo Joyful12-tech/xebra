@@ -33,7 +33,7 @@ const xebra = createXebraClient({
     apiKey: {
       type: 'string',
       description:
-        'Sent as `Authorization: Bearer <apiKey>`. Optional. API keys are not issued yet; the API answers without one.',
+        'Sent as `Authorization: Bearer <apiKey>`. Optional: without one the API answers at 60 requests a minute per IP instead of 600 per key. See [API keys](/docs/guides/api-keys).',
     },
     fetch: {
       type: 'typeof fetch',

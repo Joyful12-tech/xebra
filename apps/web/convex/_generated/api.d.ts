@@ -8,7 +8,9 @@
  * @module
  */
 
+import type * as apiKeys from "../apiKeys.js";
 import type * as irisBudget from "../irisBudget.js";
+import type * as rateLimit from "../rateLimit.js";
 
 import type {
   ApiFromModules,
@@ -17,7 +19,9 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  apiKeys: typeof apiKeys;
   irisBudget: typeof irisBudget;
+  rateLimit: typeof rateLimit;
 }>;
 
 /**

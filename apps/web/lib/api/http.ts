@@ -1,11 +1,12 @@
 import { ERROR_TYPE_BASE } from "@xebra/sdk";
+import { type Gate, rateHeaders } from "./access";
 import { ApiError } from "./errors";
 import { extraToWire } from "./wire";
 
 /**
- * The HTTP edge of the public API: read the input, check it against the SDK's schema, run, check
- * the output against its schema, and answer. Every failure is an RFC 9457 problem; nothing escapes
- * as a bare 500 page or a stack trace.
+ * The HTTP edge of the public API: identify the caller, count the request, read the input, check it
+ * against the SDK's schema, run, check the output against its schema, and answer. Every failure is
+ * an RFC 9457 problem; nothing escapes as a bare 500 page or a stack trace.
  */
 
 /** What this needs from a zod schema, without depending on zod's own types here. */
@@ -41,6 +42,8 @@ const TITLES: Partial<Record<ApiError["code"], string>> = {
   transaction_rejected: "Transaction would be rejected",
   not_ready: "Not ready",
   already_delivered: "Already delivered",
+  unauthorized: "Unauthorized",
+  rate_limited: "Rate limited",
   upstream_unavailable: "Upstream unavailable",
   internal_error: "Internal error",
 };
@@ -62,6 +65,7 @@ export function problem(err: ApiError, headers: Record<string, string> = {}): Re
         "Content-Type": "application/problem+json",
         "Cache-Control": "no-store",
         ...(err.status === 503 ? { "Retry-After": "10" } : {}),
+        ...err.headers,
         ...headers,
       },
     },
@@ -121,6 +125,7 @@ async function readBody(req: Request): Promise<unknown> {
 
 export async function handle<I, O>(
   req: Request,
+  gate: Gate,
   opts: {
     /** Where the input comes from. Path parameters are passed in `params`. */
     from: "none" | "query" | "body" | "params";
@@ -133,6 +138,11 @@ export async function handle<I, O>(
   },
 ): Promise<Response> {
   try {
+    // Before anything is parsed: an unknown key is refused, and a request past the limit is
+    // counted, without the body being read or a chain reached.
+    const caller = await gate.identify(req);
+    const rate = await gate.hit(caller, req);
+
     let raw: unknown = {};
     if (opts.from === "query") raw = Object.fromEntries(new URL(req.url).searchParams);
     if (opts.from === "body") raw = await readBody(req);
@@ -152,7 +162,11 @@ export async function handle<I, O>(
       throw new ApiError("internal_error", "The answer failed our own checks. Nothing was sent.");
     }
     return Response.json(checked.data, {
-      headers: { ...CORS, "Cache-Control": opts.cache ?? "no-store" },
+      headers: {
+        ...CORS,
+        ...rateHeaders(rate),
+        "Cache-Control": opts.cache ?? "no-store",
+      },
     });
   } catch (err) {
     if (err instanceof ApiError) return problem(err);

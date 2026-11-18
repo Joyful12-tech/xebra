@@ -12,6 +12,7 @@ import {
   TransferStatusSchema,
 } from "@xebra/sdk";
 import { parseUsdcAmount } from "@xebra/sdk/core";
+import type { Gate } from "./access";
 import { ApiError } from "./errors";
 import { handle } from "./http";
 import { type DestId, type Service, type SourceId, isDestId, isSourceId } from "./service";
@@ -46,10 +47,10 @@ function source(chain: string): SourceId {
   return chain;
 }
 
-export function endpoints(service: Service) {
+export function endpoints(service: Service, gate: Gate) {
   return {
     routes: (req: Request) =>
-      handle(req, {
+      handle(req, gate, {
         from: "none",
         run: async () => {
           const r = await service.routes();
@@ -60,7 +61,7 @@ export function endpoints(service: Service) {
       }),
 
     quote: (req: Request) =>
-      handle(req, {
+      handle(req, gate, {
         from: "query",
         input: QuoteRequestSchema,
         run: async (q) => {
@@ -82,7 +83,7 @@ export function endpoints(service: Service) {
       }),
 
     createTransfer: (req: Request) =>
-      handle(req, {
+      handle(req, gate, {
         from: "body",
         input: TransferRequestSchema,
         run: async (r) =>
@@ -102,7 +103,7 @@ export function endpoints(service: Service) {
       }),
 
     getTransfer: (req: Request, params: { chain: string; tx: string }) =>
-      handle(req, {
+      handle(req, gate, {
         from: "params",
         params,
         input: TransferPathSchema,
@@ -112,7 +113,7 @@ export function endpoints(service: Service) {
       }),
 
     createClaim: (req: Request) =>
-      handle(req, {
+      handle(req, gate, {
         from: "body",
         input: ClaimRequestSchema,
         run: async (c) =>
@@ -128,7 +129,7 @@ export function endpoints(service: Service) {
       }),
 
     health: (req: Request) =>
-      handle(req, {
+      handle(req, gate, {
         from: "none",
         run: async () => ({ status: "ok" as const, version: SDK_VERSION }),
         output: HealthSchema,

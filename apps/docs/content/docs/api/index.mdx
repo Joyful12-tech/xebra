@@ -42,11 +42,19 @@ live, and the [routes page](/docs/concepts/routes) shows them.
 
 ## Authentication
 
-None today. Every endpoint answers without a key.
+Optional. Every endpoint answers without a key, at a lower limit.
 
-The SDK already accepts an `apiKey` and sends it as `Authorization: Bearer <key>`, so code written
-now keeps working when keys arrive. Keys will raise your limits and let you receive webhooks. A
-request without a key will keep working, at lower limits.
+Send a key as `Authorization: Bearer <key>` — with the SDK, that is the `apiKey` option of
+`createXebraClient`: it raises your limit from 60 requests a minute to 600 (see [Limits](#limits)).
+A key identifies an integrator; it never authorises moving funds. The API is non-custodial, returns
+unsigned transactions and never accepts a private key.
+
+A key we do not know, or one that has been revoked, answers
+[`unauthorized`](/docs/errors/unauthorized). Revocation takes effect within a minute. Requests that
+send no `Authorization` header are never refused: they run at the anonymous limit.
+
+Keys are issued by Xebra today. [API keys](/docs/guides/api-keys) says how to ask for one, and how
+to mint one on your own deployment.
 
 ## Errors
 
@@ -55,15 +63,24 @@ Every failure is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem w
 
 ## Limits
 
-There are no published per-client limits yet. Please be gentle:
+Requests are counted per whole minute, UTC.
+
+| Caller | Requests a minute |
+|---|---|
+| No key | 60 per IP address |
+| A key | 600 per key |
+
+Every answer carries what is left of the window: `RateLimit-Limit`, `RateLimit-Remaining` and
+`RateLimit-Reset` (seconds until it resets). Past the limit the answer is `429`
+[`rate_limited`](/docs/errors/rate_limited) with a `Retry-After` header saying how many seconds to
+wait. Wait that long; do not retry immediately.
 
 - Cache `GET /v1/routes`. It is served with `s-maxage=30`, so asking more often gains nothing.
 - Poll a transfer's status every few seconds, not in a tight loop. The SDK's `waitForDelivery`
   asks every 5 seconds.
 - A `503 upstream_unavailable` carries `Retry-After: 10`. Wait that long before asking again.
 
-When limits arrive, a client that goes over them gets `429` with
-[`rate_limited`](/docs/errors/rate_limited) and a `Retry-After` header.
+A key raises the limit; [API keys](/docs/guides/api-keys) has the details.
 
 ## Quotes expire
 

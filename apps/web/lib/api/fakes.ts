@@ -3,6 +3,7 @@ import type { CircleHealth } from "@xebra/cctp-client";
 import type { TransferStep } from "@xebra/sdk/build";
 import { type DomainForwardConfig, stellarDestination } from "@xebra/sdk/core";
 import type { WrapperSettings } from "../evm-wrapper";
+import type { Gate } from "./access";
 import type { BuildDeps, Deps } from "./deps";
 
 /** Fakes shared by the service and MCP tests: one route table, one Circle answer, no network. */
@@ -57,6 +58,15 @@ export function deps(over: Partial<Deps> = {}): Deps {
     ...over,
   };
 }
+
+/**
+ * A gate that identifies nobody and never limits: the tests that are not about keys or limits. The
+ * tests that are use `createGate` from `access.ts` with an in-memory counter.
+ */
+export const openGate: Gate = {
+  identify: async () => null,
+  hit: async () => ({ limit: 600, remaining: 599, reset: 60 }),
+};
 
 export const WRAPPER = "CCPVTWII2TW6VVSVA4JQ2KFHICGBG4QVAHPIGUPSIW3E4VNPUI4Y2WQR";
 

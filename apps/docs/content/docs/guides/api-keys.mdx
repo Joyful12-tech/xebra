@@ -1,0 +1,92 @@
+---
+title: API keys
+description: Send a key for a higher rate limit. Keys identify an integrator and never move funds.
+---
+
+A key raises your limit from 60 requests a minute to 600. That is all it does: keys identify an
+integrator, so a busy product is not throttled alongside everyone else. They never authorise
+moving funds — the API is non-custodial, builds unsigned transactions and never accepts a private
+key.
+
+Requests without a key keep working. Nothing needs a key to read routes, price a transfer, build
+one or follow it.
+
+## Sending a key
+
+```ts twoslash
+import { createXebraClient } from "@xebra/sdk";
+
+const xebra = createXebraClient({ apiKey: process.env.XEBRA_API_KEY });
+```
+
+The SDK sends it as `Authorization: Bearer <key>`. Without the SDK:
+
+```bash
+curl -H "Authorization: Bearer $XEBRA_API_KEY" \
+  "https://api.xebra.exchange/v1/quote?from=stellar&to=base&amount=10"
+```
+
+A key we do not know, or one that has been revoked, answers `401`
+[`unauthorized`](/docs/errors/unauthorized). Revocation takes effect within a minute.
+
+## Limits
+
+| Caller | Requests a minute |
+|---|---|
+| No key | 60 per IP address |
+| A key | 600 per key |
+
+Limits are per whole minute, UTC. Every answer carries what is left of the window:
+
+| Header | Means |
+|---|---|
+| `RateLimit-Limit` | The minute's limit for this caller |
+| `RateLimit-Remaining` | Requests left in this minute |
+| `RateLimit-Reset` | Seconds until the window resets |
+
+Past the limit the answer is `429` [`rate_limited`](/docs/errors/rate_limited) with a `Retry-After`
+header saying how many seconds to wait. The SDK's `waitForDelivery` waits that out on its own; a
+request of your own should read `Retry-After` rather than retry immediately.
+
+```ts twoslash
+import { XebraApiError, createXebraClient } from "@xebra/sdk";
+
+const xebra = createXebraClient({ apiKey: process.env.XEBRA_API_KEY });
+try {
+  await xebra.routes();
+} catch (err) {
+  if (err instanceof XebraApiError && err.code === "rate_limited") {
+    console.log("Slow down; Retry-After says how long.");
+  }
+}
+```
+
+Two habits keep you well under the limit:
+
+- Cache `GET /v1/routes`. It is served with `s-maxage=30`.
+- Poll a transfer every few seconds, not in a loop. `waitForDelivery` asks every 5 seconds.
+
+## Getting a key
+
+Keys are issued by Xebra while the developer platform is young: ask in the
+[repository](https://github.com/xebra-org/xebra/issues), or, if you run your own deployment, mint one
+against it. A key is shown once, at creation; only a digest is stored, so nobody — including us —
+can show it again.
+
+```bash
+# Against your own Convex deployment, with its secret in the environment:
+CONVEX_URL=https://your-deployment.convex.cloud XEBRA_API_SECRET=... \
+  pnpm --filter @xebra/web keys create --name "Acme" --owner you@acme.com
+
+CONVEX_URL=... XEBRA_API_SECRET=... pnpm --filter @xebra/web keys list
+CONVEX_URL=... XEBRA_API_SECRET=... pnpm --filter @xebra/web keys revoke <id>
+```
+
+`keys list` prints each key's prefix, name, owner and state — never the key. A revoked key answers
+`401` within a minute.
+
+## Storage
+
+The server keeps `sha256(key)` and the key's first 12 characters. It never stores the key, and the
+key is never sent to the service that stores it. Keep it in a server-side environment variable, not
+in code that reaches a browser: it is a credential, even though it cannot move money.

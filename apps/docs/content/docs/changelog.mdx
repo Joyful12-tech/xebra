@@ -3,6 +3,21 @@ title: Changelog
 description: What changed in the Xebra API and SDK, newest first.
 ---
 
+## Unreleased
+
+**API**:
+
+- API keys. Send one as `Authorization: Bearer <key>` and your limit rises from 60 requests a
+  minute per IP address to 600 per key. Requests without a key keep working, unchanged and
+  unauthenticated. A key that is unknown or revoked answers `401 unauthorized`, within a minute of
+  revocation.
+- Limits answer `429 rate_limited` with a `Retry-After` header, and every answer carries
+  `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset`. See [API keys](/docs/guides/api-keys).
+- A key identifies an integrator; it never authorises moving funds. The API stays non-custodial and
+  never accepts a private key.
+
+**SDK**: nothing changed. `createXebraClient({ apiKey })` now has an effect.
+
 ## 0.4.0 (2026-11-15)
 
 **SDK**, `@xebra/sdk` 0.4.0, `@xebra/sdk/intents`:
@@ -82,7 +97,7 @@ SDK.
 
 These are not released and have no dates yet:
 
-- **API keys and webhooks**: keys with higher rate limits, signed webhooks for transfer status, and
-  idempotency keys. See [Webhooks](/docs/guides/webhooks).
+- **Webhooks and idempotency**: signed webhooks for transfer status, with a key, and idempotency
+  keys for `POST`. See [Webhooks](/docs/guides/webhooks).
 - **Integrator fees**: a fee you set on the transfers you send, paid out on chain. See
   [Integrator fees](/docs/guides/integrator-fees).
