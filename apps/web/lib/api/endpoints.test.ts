@@ -8,7 +8,6 @@ import {
 } from "@xebra/sdk";
 import { stellarDestination } from "@xebra/sdk/core";
 import { describe, expect, it } from "vitest";
-import { OPEN_GUARD } from "./auth";
 import {
   DELETE as catchAllDelete,
   GET as catchAllGet,
@@ -17,6 +16,7 @@ import {
   POST as catchAllPost,
   PUT as catchAllPut,
 } from "../../app/v1/[[...rest]]/route";
+import { OPEN_GUARD } from "./auth";
 import type { Deps } from "./deps";
 import { endpoints } from "./endpoints";
 import {
