@@ -5,6 +5,7 @@ What must be shared between Vercel instances:
 - `irisBudget`: the counter that keeps our calls to Circle's Iris API under its rate limit.
 - `apiKeys`: issued API keys, only ever as SHA-256 hashes. See `apiKeys.ts`.
 - `rateWindows`: per-key and per-IP request counts in fixed minute windows. See `rateLimit.ts`.
+- A cron that drops rateWindows older than 2 minutes, so idle buckets do not leave rows behind.
 
 There used to be a relay here (jobs, retries, a burn watcher, a hot wallet). It is gone. Circle's
 Forwarding Service mints on the destination, and a transfer whose forward fails is claimed by its
@@ -47,6 +48,16 @@ node scripts/api-keys.mjs revoke <id>
 
 The key is generated in the script, shown once, and never written here: Convex stores its hash and
 a 12-character prefix. A revoked key answers 401 within a minute (the guard's cache TTL).
+
+## Scheduled cleanup
+
+`rateLimit.pruneOld` runs every minute via Convex's cron scheduler. It deletes any rateWindows
+whose minute is more than 2 minutes old. Each bucket keeps at most its current and previous
+minute in normal operation, but buckets that go idle for a while otherwise leave their old rows
+behind forever; the cron reclaims that space.
+
+To register the cron on a deployment, run `npx convex dev` or `npx convex deploy` after this file
+is in place. Convex reads the exported `crons` object and schedules the job.
 
 ## Bundling
 

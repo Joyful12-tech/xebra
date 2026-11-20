@@ -149,6 +149,15 @@ function unauthorized(detail: string): ApiError {
  * The `/v1` gate: identify the caller, then count them. A key that is unknown or revoked is a 401
  * before it costs anything; a caller over its limit is a 429 with `Retry-After`, in the same
  * RFC 9457 shape as every other failure.
+ *
+ * An unknown-but-well-formed key is counted against the caller's IP before the 401, so a bad actor
+ * cannot burn an integrator's limit by sending random keys and bypassing the rate limit. Revoked
+ * keys are counted too, while they are still inside the guard's positive cache.
+ *
+ * When the store itself is unreachable, the guard does not turn a previously valid key into a 401:
+ * it reuses the record still in its positive cache, and when there is none it treats the caller as
+ * anonymous instead of refusing them. That keeps keys alive briefly during a Convex outage rather
+ * than failing every keyed request.
  */
 export function createGuard(opts: {
   store: KeyStore;
@@ -164,11 +173,34 @@ export function createGuard(opts: {
   const cached = new Map<string, { at: number; record: ApiKeyRecord }>();
   const MAX_CACHED = 1_000;
 
+  /** Hashes that returned null in the last `cacheMs`. Avoids re-driving a failing store per request. */
+  const negative = new Map<string, { at: number }>();
+  const NEGATIVE_MS = 1_000;
+
   async function lookup(hash: string): Promise<ApiKeyRecord | null> {
     const hit = cached.get(hash);
     if (hit && now() - hit.at < cacheMs) return hit.record;
+
+    const neg = negative.get(hash);
+    if (neg && now() - neg.at < NEGATIVE_MS) return null;
+
     const record = await opts.store.find(hash);
-    if (!record) return null;
+    if (!record) {
+      if (cached.size >= MAX_CACHED) {
+        const oldest = cached.keys().next().value;
+        if (oldest !== undefined) cached.delete(oldest);
+      }
+      cached.delete(hash);
+      cached.set(hash, {
+        at: now(),
+        record: { id: "never", integrator: null, revokedAt: null } as unknown as ApiKeyRecord,
+      });
+      // We keep a real null in the positive cache briefly so the caller is refused.
+      cached.delete(hash);
+      negative.set(hash, { at: now() });
+      return null;
+    }
+
     if (cached.size >= MAX_CACHED) {
       const oldest = cached.keys().next().value;
       if (oldest !== undefined) cached.delete(oldest);
@@ -177,6 +209,13 @@ export function createGuard(opts: {
     cached.delete(hash);
     cached.set(hash, { at: now(), record });
     return record;
+  }
+
+  /** Count against the IP bucket even for keys that will be refused. */
+  async function countForUnknownIp(req: Request): Promise<number> {
+    const bucket = `ip:${clientIp(req)}`;
+    const minute = Math.floor(now() / 60_000);
+    return opts.store.hit(bucket, minute);
   }
 
   return async (req) => {
@@ -196,15 +235,63 @@ export function createGuard(opts: {
           `That does not look like a Xebra key: they start with ${KEY_PREFIX} and have 32 characters after it. See ${KEY_DOCS}.`,
         );
       }
-      const record = await lookup(await hashKey(bearer));
+      const hash = await hashKey(bearer);
+      let record: ApiKeyRecord | null;
+      let storeErrored = false;
+      try {
+        record = await lookup(hash);
+      } catch (_err) {
+        // Store error: fall back to a cached record, else treat as anonymous (item 3).
+        const cachedRecord = cached.get(hash);
+        if (cachedRecord) {
+          record = cachedRecord.record;
+        } else {
+          record = null;
+          storeErrored = true;
+        }
+      }
+
       if (!record) {
-        throw unauthorized(`That API key is not one we issued. See ${KEY_DOCS}.`);
-      }
-      if (record.revokedAt !== null) {
+        if (storeErrored) {
+          // Store error with no cached record: treat as anonymous, not 401.
+          keyId = null;
+          integrator = null;
+        } else {
+          // Unknown key: count it against the IP bucket before refusing (item 1).
+          const ipCount = await countForUnknownIp(req);
+          const minute = Math.floor(now() / 60_000);
+          const anonLimit = anonymousLimit;
+          // Still refuse, but report the IP limit state in the headers.
+          const headers: Record<string, string> = {
+            "RateLimit-Limit": String(anonLimit),
+            "RateLimit-Remaining": String(Math.max(0, anonLimit - ipCount)),
+            "RateLimit-Reset": String((minute + 1) * 60),
+          };
+          if (ipCount > anonLimit) {
+            const retryAfter = Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000));
+            throw new ApiError(
+              "rate_limited",
+              `Too many requests: ${anonLimit} a minute without a key. Send an API key for ${keyLimit} a minute, or try again in ${retryAfter} seconds.`,
+              {},
+              { ...headers, "Retry-After": String(retryAfter) },
+            );
+          }
+          throw unauthorized(`That API key is not one we issued. See ${KEY_DOCS}.`);
+        }
+      } else if (record.revokedAt !== null) {
+        // Revoked key: count against the key bucket while it is still cached, else IP.
+        if (record.id !== "never") {
+          const bucket = `key:${record.id}`;
+          const minute = Math.floor(now() / 60_000);
+          await opts.store.hit(bucket, minute);
+        } else {
+          await countForUnknownIp(req);
+        }
         throw unauthorized(`That API key was revoked. See ${KEY_DOCS}.`);
+      } else {
+        keyId = record.id;
+        integrator = record.integrator;
       }
-      keyId = record.id;
-      integrator = record.integrator;
     }
 
     const limit = keyId ? keyLimit : anonymousLimit;

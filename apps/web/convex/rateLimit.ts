@@ -1,3 +1,4 @@
+import { cronJobs } from "convex/server";
 import { v } from "convex/values";
 import { type MutationCtx, mutation } from "./_generated/server";
 import { requireSecret } from "./auth";
@@ -15,6 +16,37 @@ import { requireSecret } from "./auth";
 
 /** How many old windows to clear per hit; a bucket normally has one or two. */
 const PRUNE_LIMIT = 20;
+
+/**
+ * How old a window must be before the scheduled cleanup will delete it. Two minutes gives every
+ * caller time to hit the Retry-After value and a little more, and keeps the table small.
+ */
+export const PRUNE_OLDER_THAN_MINUTES = 2;
+
+/**
+ * Scheduled cleanup: drop rateWindows older than `PRUNE_OLDER_THAN_MINUTES` minutes. Runs on a
+ * Convex cron so the table stays small even when buckets are idle and never receive another hit.
+ *
+ * See `convex/README.md` and the deployment's cron schedule for how this is registered.
+ */
+export const pruneOld = mutation({
+  args: { nowMs: v.optional(v.number()) },
+  handler: async (ctx, { nowMs }) => {
+    requireSecret(process.env.XEBRA_API_SECRET ?? "");
+    const now = nowMs ?? Date.now();
+    const cutoff = Math.floor(now / 60_000) - PRUNE_OLDER_THAN_MINUTES;
+    let cursor = undefined as unknown as { _id: string } | undefined;
+    while (true) {
+      const batch = await ctx.db
+        .query("rateWindows")
+        .withIndex("by_key_minute", (q) => q.lt("minute", cutoff))
+        .take(PRUNE_LIMIT, cursor ? { cursor } : {});
+      if (batch.length === 0) break;
+      for (const row of batch) await ctx.db.delete(row._id);
+      cursor = batch[batch.length - 1];
+    }
+  },
+});
 
 export const hit = mutation({
   args: { secret: v.string(), bucket: v.string(), minute: v.number() },
@@ -45,3 +77,6 @@ async function prune(ctx: MutationCtx, bucket: string, minute: number): Promise<
     .take(PRUNE_LIMIT);
   for (const row of old) await ctx.db.delete(row._id);
 }
+
+export const crons = cronJobs();
+crons.interval("prune old rate windows", { minutes: 1 }, pruneOld, {});

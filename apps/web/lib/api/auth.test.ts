@@ -201,6 +201,105 @@ describe("keyed callers", () => {
     await expect(resilient.hit("ip:203.0.113.7", 1)).resolves.toBe(1);
     expect(failures).toHaveLength(2);
   });
+
+  it("counts an unknown key against the IP bucket before refusing it", async () => {
+    const store = createMemoryKeyStore();
+    const guard = createGuard({ store, now: () => START });
+    // Hit the anonymous limit for this IP.
+    for (let i = 0; i < ANONYMOUS_LIMIT; i++) {
+      await guard(request({ "X-Forwarded-For": "203.0.113.9" }));
+    }
+    // An unknown key from the same IP: counted against the IP bucket, then refused.
+    const err = await refusal(guard(keyed(KEY, "203.0.113.9")));
+    expect(err.code).toBe("rate_limited");
+    expect(err.status).toBe(429);
+    // The key was never found, so it is not a keyed bucket.
+    expect(err.detail).toContain("without a key");
+  });
+
+  it("counts a revoked key against its key bucket while it is still cached", async () => {
+    const time = clock();
+    const { store, hash } = await seeded(KEY);
+    const guard = createGuard({ store, now: time.now });
+
+    // Use the key once so the record is cached.
+    await expect(guard(keyed(KEY))).resolves.toMatchObject({ keyId: "key_1" });
+
+    // Wait for the cache to expire so the guard re-reads the store.
+    time.advance(61_000);
+
+    // Now revoke the key and the guard will see the revocation on next lookup.
+    const record = store.keys.get(hash);
+    if (!record) throw new Error("seed lost");
+    record.revokedAt = time.now();
+
+    // The revoked key is counted against key_1's bucket before being refused.
+    const err = await refusal(guard(keyed(KEY)));
+    expect(err.code).toBe("unauthorized");
+    expect(err.detail).toContain("revoked");
+  });
+
+  it("fallback to a cached record when the store errors, not a 401", async () => {
+    const { store } = await seeded(KEY);
+    // Pre-warm the guard's positive cache.
+    const guard = createGuard({ store, now: () => START });
+    await guard(keyed(KEY));
+
+    // Replace the store with one that errors, wrapped so the guard sees the error
+    // and falls back to its cache.
+    const failingStore: KeyStore = {
+      find: async () => {
+        throw new Error("convex unreachable");
+      },
+      hit: async (bucket, minute) => {
+        // Still count against the key bucket.
+        return store.hit(bucket, minute);
+      },
+    };
+
+    const resilient = resilientKeyStore(failingStore, store);
+    const resilientGuard = createGuard({ store: resilient, now: () => START });
+
+    // The guard falls back to the cached record and accepts the request.
+    await expect(resilientGuard(keyed(KEY))).resolves.toMatchObject({ keyId: "key_1" });
+  });
+
+  it("treats an uncached key as anonymous when the store errors, not a 401", async () => {
+    // A store that always throws: no fallback, so the guard sees the error directly.
+    const failingStore: KeyStore = {
+      find: async () => {
+        throw new Error("convex unreachable");
+      },
+      hit: async (_bucket, _minute) => {
+        // Count against the IP bucket even on error.
+        return 0;
+      },
+    };
+    const guard = createGuard({ store: failingStore, now: () => START });
+
+    // A key that was never cached: the store errors, so the guard treats the caller
+    // as anonymous instead of returning 401.
+    const gate = await guard(keyed(KEY));
+    expect(gate).toMatchObject({ keyId: null, integrator: null });
+    expect(gate.headers["RateLimit-Limit"]).toBe(String(ANONYMOUS_LIMIT));
+  });
+
+  it("caches a negative lookup briefly so a failing store is not hammered", async () => {
+    const calls: string[] = [];
+    const store: KeyStore = {
+      find: async (hash) => {
+        calls.push(hash);
+        return null;
+      },
+      hit: async () => 0,
+    };
+    const guard = createGuard({ store, now: () => START });
+
+    await expect(guard(keyed(KEY))).rejects.toMatchObject({ code: "unauthorized" });
+    await expect(guard(keyed(KEY))).rejects.toMatchObject({ code: "unauthorized" });
+    // The second call reused the negative cache; the store was not asked again.
+    expect(calls).toHaveLength(1);
+  });
 });
 
 describe("through the /v1 handler", () => {
