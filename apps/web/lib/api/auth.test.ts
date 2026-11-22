@@ -5,6 +5,7 @@ import {
   type ApiKeyRecord,
   type Guard,
   KEY_LIMIT,
+  type KeyStore,
   clientIp,
   createGuard,
   createMemoryKeyStore,
@@ -239,7 +240,32 @@ describe("keyed callers", () => {
     expect(err.detail).toContain("revoked");
   });
 
-  it("fallback to a cached record when the store errors, not a 401", async () => {
+  it("treats an uncached key as anonymous when the store errors during an outage", async () => {
+    // In production the fallback store is empty, so resilientKeyStore.find re-throws when the
+    // primary fails and the fallback has no record. The guard catches that error and treats the
+    // caller as anonymous (the documented path), rather than returning 401.
+    const failingStore: KeyStore = {
+      find: async () => {
+        throw new Error("convex unreachable");
+      },
+      hit: async (_bucket, _minute) => {
+        // Count against the IP bucket even on error.
+        return 0;
+      },
+    };
+    // Empty fallback: no cached record to fall back to.
+    const emptyFallback = createMemoryKeyStore();
+    const store = resilientKeyStore(failingStore, emptyFallback);
+    const guard = createGuard({ store, now: () => START });
+
+    // An uncached key during an outage: the store throws, no fallback record exists, so the
+    // guard treats the caller as anonymous instead of returning 401.
+    const gate = await guard(keyed(KEY));
+    expect(gate).toMatchObject({ keyId: null, integrator: null });
+    expect(gate.headers["RateLimit-Limit"]).toBe(String(ANONYMOUS_LIMIT));
+  });
+
+  it("falls back to a cached record when the store errors during an outage", async () => {
     const { store } = await seeded(KEY);
     // Pre-warm the guard's positive cache.
     const guard = createGuard({ store, now: () => START });
@@ -262,26 +288,6 @@ describe("keyed callers", () => {
 
     // The guard falls back to the cached record and accepts the request.
     await expect(resilientGuard(keyed(KEY))).resolves.toMatchObject({ keyId: "key_1" });
-  });
-
-  it("treats an uncached key as anonymous when the store errors, not a 401", async () => {
-    // A store that always throws: no fallback, so the guard sees the error directly.
-    const failingStore: KeyStore = {
-      find: async () => {
-        throw new Error("convex unreachable");
-      },
-      hit: async (_bucket, _minute) => {
-        // Count against the IP bucket even on error.
-        return 0;
-      },
-    };
-    const guard = createGuard({ store: failingStore, now: () => START });
-
-    // A key that was never cached: the store errors, so the guard treats the caller
-    // as anonymous instead of returning 401.
-    const gate = await guard(keyed(KEY));
-    expect(gate).toMatchObject({ keyId: null, integrator: null });
-    expect(gate.headers["RateLimit-Limit"]).toBe(String(ANONYMOUS_LIMIT));
   });
 
   it("caches a negative lookup briefly so a failing store is not hammered", async () => {

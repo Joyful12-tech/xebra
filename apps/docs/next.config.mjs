@@ -19,7 +19,7 @@ const config = {
       { source: "/errors", destination: "/docs/errors", permanent: true },
       { source: "/errors/:code", destination: "/docs/errors/:code", permanent: true },
       // Old short paths used before the docs moved under /docs/docs/.
-      { source: "/guides/api-keys", destination: "/docs/docs/guides/api-keys", permanent: true },
+      { source: "/guides/api-keys", destination: "/docs/guides/api-keys", permanent: true },
     ];
   },
 };

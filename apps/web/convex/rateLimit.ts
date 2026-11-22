@@ -1,6 +1,5 @@
-import { cronJobs } from "convex/server";
 import { v } from "convex/values";
-import { type MutationCtx, mutation } from "./_generated/server";
+import { type MutationCtx, internalMutation } from "./_generated/server";
 import { requireSecret } from "./auth";
 
 /**
@@ -28,22 +27,23 @@ export const PRUNE_OLDER_THAN_MINUTES = 2;
  * Convex cron so the table stays small even when buckets are idle and never receive another hit.
  *
  * See `convex/README.md` and the deployment's cron schedule for how this is registered.
+ *
+ * This is an internal mutation: the cron scheduler calls it directly, and no public route exposes
+ * it. The cutoff is computed inside the mutation from the server's clock, so a caller cannot pass
+ * a future `nowMs` and wipe every rate window.
  */
-export const pruneOld = mutation({
-  args: { nowMs: v.optional(v.number()) },
-  handler: async (ctx, { nowMs }) => {
+export const pruneOld = internalMutation({
+  handler: async (ctx) => {
     requireSecret(process.env.XEBRA_API_SECRET ?? "");
-    const now = nowMs ?? Date.now();
+    const now = Date.now();
     const cutoff = Math.floor(now / 60_000) - PRUNE_OLDER_THAN_MINUTES;
-    let cursor = undefined as unknown as { _id: string } | undefined;
     while (true) {
       const batch = await ctx.db
         .query("rateWindows")
-        .withIndex("by_key_minute", (q) => q.lt("minute", cutoff))
-        .take(PRUNE_LIMIT, cursor ? { cursor } : {});
+        .withIndex("by_key_minute", (q) => q.eq("key", "").lt("minute", cutoff))
+        .take(PRUNE_LIMIT);
       if (batch.length === 0) break;
       for (const row of batch) await ctx.db.delete(row._id);
-      cursor = batch[batch.length - 1];
     }
   },
 });
@@ -77,6 +77,3 @@ async function prune(ctx: MutationCtx, bucket: string, minute: number): Promise<
     .take(PRUNE_LIMIT);
   for (const row of old) await ctx.db.delete(row._id);
 }
-
-export const crons = cronJobs();
-crons.interval("prune old rate windows", { minutes: 1 }, pruneOld, {});

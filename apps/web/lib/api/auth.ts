@@ -102,6 +102,11 @@ export function createMemoryKeyStore(
  * The shared store, with this instance's memory behind it. A Convex outage must not take the API
  * with it: anonymous calls keep their per-instance limit, and a key we cannot check is refused
  * rather than trusted.
+ *
+ * When the primary store throws and the fallback has no record (the common production case: an
+ * empty in-memory fallback), `find` re-throws so the guard can refuse the request. When the
+ * fallback does have a record (a seeded test or a recently-cached key), that record is returned
+ * so a brief outage does not turn a valid key into a 401.
  */
 export function resilientKeyStore(
   primary: KeyStore,
@@ -114,7 +119,9 @@ export function resilientKeyStore(
         return await primary.find(hash);
       } catch (err) {
         onError?.(err);
-        return fallback.find(hash);
+        const fallbackRecord = await fallback.find(hash);
+        if (fallbackRecord === null) throw err;
+        return fallbackRecord;
       }
     },
     async hit(bucket, minute) {
@@ -186,17 +193,6 @@ export function createGuard(opts: {
 
     const record = await opts.store.find(hash);
     if (!record) {
-      if (cached.size >= MAX_CACHED) {
-        const oldest = cached.keys().next().value;
-        if (oldest !== undefined) cached.delete(oldest);
-      }
-      cached.delete(hash);
-      cached.set(hash, {
-        at: now(),
-        record: { id: "never", integrator: null, revokedAt: null } as unknown as ApiKeyRecord,
-      });
-      // We keep a real null in the positive cache briefly so the caller is refused.
-      cached.delete(hash);
       negative.set(hash, { at: now() });
       return null;
     }
@@ -279,14 +275,10 @@ export function createGuard(opts: {
           throw unauthorized(`That API key is not one we issued. See ${KEY_DOCS}.`);
         }
       } else if (record.revokedAt !== null) {
-        // Revoked key: count against the key bucket while it is still cached, else IP.
-        if (record.id !== "never") {
-          const bucket = `key:${record.id}`;
-          const minute = Math.floor(now() / 60_000);
-          await opts.store.hit(bucket, minute);
-        } else {
-          await countForUnknownIp(req);
-        }
+        // Revoked key: count against the key bucket while it is still cached.
+        const bucket = `key:${record.id}`;
+        const minute = Math.floor(now() / 60_000);
+        await opts.store.hit(bucket, minute);
         throw unauthorized(`That API key was revoked. See ${KEY_DOCS}.`);
       } else {
         keyId = record.id;

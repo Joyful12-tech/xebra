@@ -29,8 +29,9 @@ contributor has not generated. The Next.js routes reach these functions by name 
 
 `irisBudget.acquire`, `irisBudget.rateLimited`, `irisBudget.current`, `apiKeys.create`,
 `apiKeys.revoke`, `apiKeys.list`, `apiKeys.authenticate` and `rateLimit.hit`. They are public
-because the Next.js server calls them over HTTP, and each takes `secret`, checked against
-`XEBRA_API_SECRET` on this deployment. Unguarded, anyone could call `rateLimited` and blind our
+because the Next.js server calls them over HTTP, and each takes `secret`, checked against the
+appropriate secret on this deployment (`IRIS_BUDGET_SECRET` for `irisBudget`, `XEBRA_API_SECRET`
+for `apiKeys` and `rateLimit`). Unguarded, anyone could call `rateLimited` and blind our
 delivery status and health check for five and a half minutes, mint themselves an API key, or spend
 another integrator's minute. None of it moves money. An unset secret refuses everything.
 

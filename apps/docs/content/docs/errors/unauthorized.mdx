@@ -16,6 +16,9 @@ Check the key against the one you were given. The API answers without a key as w
 limit, so you can drop the `Authorization` header to tell a key problem from anything else. A
 revoked key answers 401 within a minute of revocation.
 
+Every response carries `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` headers, and
+429 responses also include `Retry-After`.
+
 See [API keys](/docs/guides/api-keys) for the format and the limits.
 
 ## Example
