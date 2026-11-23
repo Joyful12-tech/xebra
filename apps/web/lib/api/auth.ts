@@ -100,11 +100,11 @@ export function createMemoryKeyStore(
 
 /**
  * The shared store, with this instance's memory behind it. A Convex outage must not take the API
- * with it: anonymous calls keep their per-instance limit, and a key we cannot check is refused
- * rather than trusted.
+ * with it: calls keep a per-instance limit, and a key we cannot check is never trusted.
  *
  * When the primary store throws and the fallback has no record (the common production case: an
- * empty in-memory fallback), `find` re-throws so the guard can refuse the request. When the
+ * empty in-memory fallback), `find` re-throws, and the guard counts the caller as anonymous
+ * (neither trusted with the key's limit nor refused with a 401). When the
  * fallback does have a record (a seeded test or a recently-cached key), that record is returned
  * so a brief outage does not turn a valid key into a 401.
  */

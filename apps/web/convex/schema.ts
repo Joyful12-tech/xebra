@@ -56,5 +56,7 @@ export default defineSchema({
     /** The whole minute (`floor(ms / 60000)`) `count` belongs to. */
     minute: v.number(),
     count: v.number(),
-  }).index("by_key_minute", ["key", "minute"]),
+  })
+    .index("by_key_minute", ["key", "minute"])
+    .index("by_minute", ["minute"]),
 });

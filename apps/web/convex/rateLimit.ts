@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { type MutationCtx, internalMutation } from "./_generated/server";
+import { type MutationCtx, internalMutation, mutation } from "./_generated/server";
 import { requireSecret } from "./auth";
 
 /**
@@ -23,28 +23,27 @@ const PRUNE_LIMIT = 20;
 export const PRUNE_OLDER_THAN_MINUTES = 2;
 
 /**
- * Scheduled cleanup: drop rateWindows older than `PRUNE_OLDER_THAN_MINUTES` minutes. Runs on a
- * Convex cron so the table stays small even when buckets are idle and never receive another hit.
+ * Most windows one cleanup run deletes. It runs every minute, so a backlog clears over a few runs
+ * while each run stays well inside a mutation's write limits.
+ */
+const PRUNE_BATCH = 500;
+
+/**
+ * Scheduled cleanup (`convex/crons.ts`): drop rateWindows older than `PRUNE_OLDER_THAN_MINUTES`,
+ * for every bucket, so the table stays small even for buckets that never receive another hit.
  *
- * See `convex/README.md` and the deployment's cron schedule for how this is registered.
- *
- * This is an internal mutation: the cron scheduler calls it directly, and no public route exposes
- * it. The cutoff is computed inside the mutation from the server's clock, so a caller cannot pass
- * a future `nowMs` and wipe every rate window.
+ * An internal mutation: only the cron scheduler can call it, so it needs no secret. The cutoff is
+ * computed from the server's clock, never passed in.
  */
 export const pruneOld = internalMutation({
+  args: {},
   handler: async (ctx) => {
-    requireSecret(process.env.XEBRA_API_SECRET ?? "");
-    const now = Date.now();
-    const cutoff = Math.floor(now / 60_000) - PRUNE_OLDER_THAN_MINUTES;
-    while (true) {
-      const batch = await ctx.db
-        .query("rateWindows")
-        .withIndex("by_key_minute", (q) => q.eq("key", "").lt("minute", cutoff))
-        .take(PRUNE_LIMIT);
-      if (batch.length === 0) break;
-      for (const row of batch) await ctx.db.delete(row._id);
-    }
+    const cutoff = Math.floor(Date.now() / 60_000) - PRUNE_OLDER_THAN_MINUTES;
+    const old = await ctx.db
+      .query("rateWindows")
+      .withIndex("by_minute", (q) => q.lt("minute", cutoff))
+      .take(PRUNE_BATCH);
+    for (const row of old) await ctx.db.delete(row._id);
   },
 });
 

@@ -50,7 +50,6 @@ function source(chain: string): SourceId {
   return chain;
 }
 
-export function endpoints(service: Service, guard: Guard) {
 /**
  * What the handlers ask of the service. Narrower than `Service` so that `lib/api/instance.ts` can
  * pass one that builds the live service on first use: every member here is an async call, which a
@@ -61,7 +60,7 @@ export type EndpointService = Pick<
   "routes" | "solanaOpensAccount" | "quote" | "buildTransfer" | "transferStatus" | "buildClaim"
 >;
 
-export function endpoints(service: EndpointService) {
+export function endpoints(service: EndpointService, guard: Guard) {
   return {
     routes: (req: Request) =>
       handle(req, {

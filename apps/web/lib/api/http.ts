@@ -1,6 +1,6 @@
 import { ERROR_TYPE_BASE } from "@xebra/sdk";
-import type { Gate, Guard } from "./auth";
 import { logFailure } from "../server/log";
+import type { Gate, Guard } from "./auth";
 import { ApiError } from "./errors";
 import { TITLES } from "./host";
 import { extraToWire } from "./wire";
@@ -198,12 +198,6 @@ export async function handle<I, O>(
       ...(gate?.headers ?? {}),
       ...(err instanceof ApiError ? err.headers : {}),
     };
-    if (err instanceof ApiError) return problem(err, headers);
-    console.error("v1 request failed", req.url, err);
-    return problem(
-      new ApiError("internal_error", "Something went wrong on our side. Nothing was sent."),
-      headers,
-    );
     const id = requestId(req);
     const answer =
       err instanceof ApiError
@@ -225,6 +219,6 @@ export async function handle<I, O>(
         req,
       );
     }
-    return problem(answer, {}, id);
+    return problem(answer, headers, id);
   }
 }
